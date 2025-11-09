@@ -1,0 +1,16 @@
+name: cs7643-final-project
+channels:
+  - defaults
+dependencies:
+  - python==3.8.10
+  - matplotlib
+  - pandas
+  - tqdm
+  - jupyter
+  - pip
+  - pip:
+    - torch<=2.6.0
+    - torchvision
+    - notebook
+    - numpy
+    - yfinance
