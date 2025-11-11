@@ -12,5 +12,5 @@ dependencies:
     - torch<=2.6.0
     - torchvision
     - notebook
-    - numpy
+    - numpy<2
     - yfinance
