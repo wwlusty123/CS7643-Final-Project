@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
-from fetch_stock_data import collect_data
+from fetch_stock_data import collect_data, collect_eval_data
 from stock_predictor_models import StockLSTM, CustomMinMaxScaler, StockTransformer
 import torch.optim as optim
 
@@ -41,9 +41,10 @@ class ModelTrainer():
         else:
             plt.savefig("outputs/model_losses.png")
             plt.clf()
-
-    
     def eval(self, X_test, y_test, scaler, showfig=False):
+        """
+        Evaluate the model on a given set of pre-scaled, preprocessed (that is, broken into sequences) data.
+        """
         self.model.eval()
         with torch.no_grad():
             predicted = self.model(X_test)
@@ -61,6 +62,71 @@ class ModelTrainer():
             plt.savefig("outputs/model_eval.png")
             plt.clf()
 
+class StockModelEvaluator():
+    def eval(self, stock_preds):
+        """
+        Evaluate model predictions against the held-out evaluation dataset.
+
+        This method compares the predicted stock prices in `stock_preds` to the
+        project’s fixed evaluation set and computes error metrics for each stock 
+        as well as an overall summary:
+
+            1. Mean Squared Error (MSE) per stock
+            2. Symmetric Mean Absolute Percentage Error (SMAPE) per stock
+            3. Average SMAPE across all stocks
+
+        Parameters
+        ----------
+        stock_preds : pandas.DataFrame
+            DataFrame containing model predictions with columns 
+            ["AAPL", "JPM", "XOM", "BA", "UNH"], covering the date range 
+            "2024-11-01" to "2025-10-31". Index should align with the 
+            evaluation set’s dates.
+
+        Returns
+        -------
+        dict
+            Dictionary with the following keys:
+                - "per_stock_mse" : dict
+                    Mapping each stock ticker to its Mean Squared Error.
+                - "per_stock_smape" : dict
+                    Mapping each stock ticker to its Symmetric Mean Absolute 
+                    Percentage Error.
+                - "average_smape" : float
+                    Average SMAPE across all stocks.
+        """
+        eval_stocks = ['AAPL', 'BA', 'JPM', 'UNH', 'XOM']
+        if not np.all(stock_preds.columns.values == eval_stocks):
+            raise ValueError(f"stock_preds should contain the correct stocks in the right order: {eval_stocks}")
+        # rename the predicted columns: "AAPL" -> "AAPL_pred"   
+        df_preds = stock_preds.rename(columns=dict(zip(eval_stocks, [f"{stock}_pred" for stock in eval_stocks]))) 
+        df_truth = collect_eval_data()
+        num_days_before, _ = df_truth.shape
+        df_merged = df_truth.join(df_preds, how="inner")
+        num_days_after, _ = df_merged.shape
+        if num_days_before != num_days_after:
+            raise ValueError(f"Lost some days in the evaluation period when joining to predictions. Rows before -> Rows After = {num_days_before} -> {num_days_after}")
+        # add squared errors, symmetric absolute percent errors to the dataframe
+        df_errors = df_merged.copy()
+        for stock in eval_stocks:
+            df_errors[f"{stock}_SE"] = (df_errors[f"{stock}_pred"] - df_errors[stock]) ** 2
+            df_errors[f"{stock}_SAPE"] = 2 * 100 * (df_errors[f"{stock}_pred"] - df_errors[stock]).abs() / (df_errors[f"{stock}_pred"] + df_errors[stock])
+        # averaging over dates
+        df_MSEs = df_errors.mean(axis=0)[[f"{stock}_SE" for stock in eval_stocks]]
+        df_MSEs.index = df_MSEs.index.str.replace("_SE", "_MSE", regex=False)
+        dict_MSEs = df_MSEs.to_dict()
+        df_SMAPEs = df_errors.mean(axis=0)[[f"{stock}_SAPE" for stock in eval_stocks]]
+        df_SMAPEs.index = df_MSEs.index.str.replace("_SAPE", "_SMAPE", regex=False)
+        dict_SMAPEs = df_SMAPEs.to_dict()
+        # average over stocks
+        avg_SMAPE = df_SMAPEs.mean()
+        return {
+            "per_stock_mse": dict_MSEs, 
+            "per_stock_smape": dict_SMAPEs, 
+            "average_smape": avg_SMAPE
+        } 
+        
+
 def create_sequences(data, seq_length=30):
     X, y = [], []
     for i in range(len(data) - seq_length):
@@ -74,7 +140,7 @@ def create_sequences(data, seq_length=30):
         
 if __name__ == "__main__":
     # collecting and preprocessing data
-    pandas_df = collect_data(["AAPL"], "2015-01-01", "2025-09-01", freq="1d")
+    pandas_df = collect_data(["AAPL", "GOOG"], "2015-01-01", "2025-09-01", freq="1d")
     prices = torch.tensor(pandas_df.values, dtype=torch.float32)
     # turn raw data into sequences
     # X will be shape (batches, seq_len, input_dim)
