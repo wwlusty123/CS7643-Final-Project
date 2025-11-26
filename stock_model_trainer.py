@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
-from fetch_stock_data import collect_data, collect_eval_data
+from fetch_stock_data import collect_data, collect_eval_data, get_eval_stocks
 from stock_predictor_models import StockLSTM, CustomMinMaxScaler, StockTransformer
 import torch.optim as optim
 
@@ -95,7 +95,7 @@ class StockModelEvaluator():
                 - "average_smape" : float
                     Average SMAPE across all stocks.
         """
-        eval_stocks = ['AAPL', 'BA', 'JPM', 'UNH', 'XOM']
+        eval_stocks = get_eval_stocks()
         if not np.all(stock_preds.columns.values == eval_stocks):
             raise ValueError(f"stock_preds should contain the correct stocks in the right order: {eval_stocks}")
         # rename the predicted columns: "AAPL" -> "AAPL_pred"   
