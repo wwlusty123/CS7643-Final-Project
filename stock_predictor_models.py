@@ -70,3 +70,37 @@ class StockTransformer(nn.Module):
         x = x[:, -1, :]
         out = self.fc_out(x) # batch_size, output_dim
         return out
+
+class StockCNN(nn.Module):
+    def __init__(self, input_dim, hidden=32, kernel=3, output_dim=None):
+        super(StockCNN, self).__init__()
+        if output_dim is None:
+            output_dim = input
+        
+        self.input = input_dim
+        self.hidden = hidden
+        padding = kernel // 2
+        self.conv1 = nn.Conv1d(
+            in_channels=input_dim,
+            out_channels=hidden,
+            kernel_size=kernel,
+            padding=padding
+        )
+        self.conv2 = nn.Conv1d(
+            in_channels=hidden,
+            out_channels=hidden,
+            kernel_size=kernel,
+            padding=padding
+        )
+
+        self.relu = nn.ReLU()
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.linear = nn.Linear(hidden, output_dim)
+    
+    def forward(self, x):
+        x = x.permute(0, 2, 1)
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
+        x = self.pool(x).squeeze(-1)
+        out = self.linear(x)
+        return out
