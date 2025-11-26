@@ -3,7 +3,8 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
 from fetch_stock_data import collect_data, collect_eval_data, get_eval_stocks
-from stock_predictor_models import StockLSTM, CustomMinMaxScaler, StockTransformer
+import pandas as pd
+from stock_predictor_models import StockLSTM, CustomMinMaxScaler, StockTransformer, StockCNN
 import torch.optim as optim
 
 class ModelTrainer():
@@ -136,11 +137,83 @@ def create_sequences(data, seq_length=30):
     y = np.array(y)
     return torch.tensor(X), torch.tensor(y)
 
+def train_eval(model_class, kwargs=None, seq: int = 60, epochs: int = 50, lr: float = 1e-3, start: str = "2015-01-01", 
+               end: str = "2024-10-31"):
+    if kwargs is None:
+        kwargs = {}
+    
+    # 1) symbols and data for training + eval
+    eval_df = collect_eval_data()
+    eval_last = eval_df.index[-1]
+    buffer = (eval_last + pd.Timedelta(days=3)).strftime("%Y-%m-%d")
+    symbols = ["AAPL", "BA", "JPM", "UNH", "XOM"]
+    full_df = collect_data(symbols, start, buffer, freq="1d")
+    full_df = full_df.dropna()
+    prices_all = torch.tensor(full_df.values, dtype=torch.float32)
+    dates_all = np.array(full_df.index)
+
+    # 2) make sequences: x_all, y_all, and target_dates
+    X_all, y_all = create_sequences(prices_all, seq)
+    windows, _, input = X_all.shape
+    target = dates_all[seq:]
+
+    # 3) select training windows by date
+    train = target <= np.datetime64(end)
+    X_train = X_all[train]
+    y_train = y_all[train]
+    
+    # 4) scale trainin data
+    scaler = CustomMinMaxScaler()
+    X = scaler.fit_transform(X_train)
+    y = scaler.transform(y_train)
+    X = X.to("cpu")
+    y = y.to("cpu")
+
+    # 5) Build and train the model
+    mk = dict(kwargs)
+    mk.setdefault("input_dim", input)
+    mk.setdefault("output_dim", input)
+    model = model_class(**mk).to("cpu")
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    trainer = ModelTrainer(
+        criterion=criterion,
+        model=model,
+        optimizer=optimizer,
+        X_train=X,
+        y_train=y
+    )
+    trainer.train(num_epochs=epochs)
+
+    # 6) Use the trained model to predict all target data
+    X_all_scaled = scaler.transform(X_all).to("cpu")
+    model.eval()
+    with torch.no_grad():
+        preds_scaled = model(X_all_scaled)
+
+    preds = scaler.inverse_transform(preds_scaled.cpu())
+    preds_df_all = pd.DataFrame(
+        preds.numpy(),
+        index=target,
+        columns=symbols
+    )
+
+    # 7) Restrict to the official eval period + column order
+    eval_df = eval_df[["AAPL", "BA", "JPM", "UNH", "XOM"]]
+    preds_df = preds_df_all.loc[eval_df.index]
+    preds_df = preds_df[["AAPL", "BA", "JPM", "UNH", "XOM"]]
+
+    # 8) Run the official evaluator
+    evaluator = StockModelEvaluator()
+    results = evaluator.eval(preds_df)
+
+    return preds_df, results, model, scaler
+
 
         
 if __name__ == "__main__":
     # collecting and preprocessing data
-    pandas_df = collect_data(["AAPL", "GOOG"], "2015-01-01", "2025-09-01", freq="1d")
+    pandas_df = collect_data(["AAPL", "GOOG"], "2015-01-01", "2024-09-01", freq="1d")
     prices = torch.tensor(pandas_df.values, dtype=torch.float32)
     # turn raw data into sequences
     # X will be shape (batches, seq_len, input_dim)
@@ -164,10 +237,11 @@ if __name__ == "__main__":
     # setup for training
     criterion = nn.MSELoss()
     lstm_model = StockLSTM(input_dim=input_dim, hidden_dim=64, output_dim=input_dim)
-    optimizer = optim.Adam(lstm_model.parameters(), lr=0.001)
+    cnn = StockCNN(input=input_dim, hidden=32, output=input_dim)
+    optimizer = optim.Adam(cnn.parameters(), lr=0.0001)
     trainer = ModelTrainer(
         criterion,
-        lstm_model,
+        cnn,
         optimizer,
         scaled_X_train,
         scaled_y_train,
