@@ -1,5 +1,10 @@
 import yfinance as yf
 import matplotlib.pyplot as plt
+import pandas as pd
+
+def get_sp500_symbols():
+    df = pd.read_csv("sp500.csv")
+    return df["Symbol"].tolist()
 
 def collect_data(symbols, start_date, end_date, freq="1d"):
     """
