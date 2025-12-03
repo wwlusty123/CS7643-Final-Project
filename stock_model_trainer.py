@@ -2,22 +2,37 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
+from fetch_stock_data import collect_data, collect_eval_data, get_eval_stocks
 import pandas as pd
-from fetch_stock_data import collect_data, collect_eval_data
 from stock_predictor_models import StockLSTM, CustomMinMaxScaler, StockTransformer, StockCNN
 import torch.optim as optim
 
 class ModelTrainer():
-    def __init__(self, criterion, model, optimizer, X_train, y_train):
+    def __init__(
+        self, 
+        criterion, 
+        model, 
+        optimizer, 
+        X_train, 
+        y_train, 
+        X_test=None, 
+        y_test=None,
+        scheduler=None,
+    ):
         self.criterion = criterion
         self.model = model
         self.optimizer = optimizer
         self.X_train = X_train
         self.y_train = y_train
-        self.losses = None
+        self.X_test = X_test
+        self.y_test = y_test
+        self.losses = []
+        self.test_losses = []
+        self.has_test_data = self.X_test is not None and self.y_test is not None
+        self.scheduler = scheduler
+
 
     def train(self, num_epochs):
-        losses = []
         for epoch in range(num_epochs):
             self.model.train()
             self.optimizer.zero_grad()
@@ -25,24 +40,37 @@ class ModelTrainer():
             loss = self.criterion(output, self.y_train)
             loss.backward()
             self.optimizer.step()
-            losses.append(loss.item())
+            if self.scheduler is not None:
+                self.scheduler.step()
+            self.losses.append(loss.item())
+            if self.has_test_data:
+                self.model.eval()
+                with torch.no_grad():
+                    pred_test = self.model(self.X_test)
+                test_loss = self.criterion(pred_test, self.y_test)
+                self.test_losses.append(test_loss.item())
             if (epoch + 1) % 5 == 0:
-                print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.6f}")
-        self.losses = losses
+                print_str = f"Epoch [{epoch + 1}/{num_epochs}], Train Loss: {loss.item():.6f}"
+                if self.has_test_data:
+                    print_str += f", Test Loss: {test_loss.item():.6f}"
+                print(print_str)
 
-    def plot_losses(self, showfig=False):
-        if self.losses is None:
+    def plot_losses(self, fig_path="model_losses.png", showfig=False):
+        if len(self.losses) == 0:
             raise Exception("Must train a model prior to plotting losses")
-        plt.plot(self.losses)
+        plt.plot(self.losses, label="train")
+        if len(self.test_losses) > 0:
+            plt.plot(self.test_losses, label="test")
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.title("Model Training Curve")
+        plt.legend()
         if showfig:
             plt.show()
         else:
-            plt.savefig("outputs/model_losses.png")
+            plt.savefig(f"outputs/{fig_path}")
             plt.clf()
-    def eval(self, X_test, y_test, scaler, showfig=False):
+    def eval(self, X_test, y_test, scaler, showfig=False, fig_path="model_eval.png"):
         """
         Evaluate the model on a given set of pre-scaled, preprocessed (that is, broken into sequences) data.
         """
@@ -60,7 +88,7 @@ class ModelTrainer():
         if showfig:
             plt.show()
         else:
-            plt.savefig("outputs/model_eval.png")
+            plt.savefig(f"outputs/{fig_path}")
             plt.clf()
 
 class StockModelEvaluator():
@@ -96,7 +124,7 @@ class StockModelEvaluator():
                 - "average_smape" : float
                     Average SMAPE across all stocks.
         """
-        eval_stocks = ['AAPL', 'BA', 'JPM', 'UNH', 'XOM']
+        eval_stocks = get_eval_stocks()
         if not np.all(stock_preds.columns.values == eval_stocks):
             raise ValueError(f"stock_preds should contain the correct stocks in the right order: {eval_stocks}")
         # rename the predicted columns: "AAPL" -> "AAPL_pred"   
@@ -137,8 +165,17 @@ def create_sequences(data, seq_length=30):
     y = np.array(y)
     return torch.tensor(X), torch.tensor(y)
 
-def train_eval(model_class, kwargs=None, seq: int = 60, epochs: int = 50, lr: float = 1e-3, start: str = "2015-01-01", 
-               end: str = "2024-10-31"):
+def train_eval(
+    model_class, 
+    kwargs=None, 
+    seq: int = 60, 
+    epochs: int = 50, 
+    lr: float = 1e-3, 
+    start: str = "2015-01-01", 
+    end: str = "2024-10-31",
+    train_fig_path="model_losses.png",
+    eval_fig_path="model_eval.png",
+):
     if kwargs is None:
         kwargs = {}
     
@@ -146,7 +183,7 @@ def train_eval(model_class, kwargs=None, seq: int = 60, epochs: int = 50, lr: fl
     eval_df = collect_eval_data()
     eval_last = eval_df.index[-1]
     buffer = (eval_last + pd.Timedelta(days=3)).strftime("%Y-%m-%d")
-    symbols = ["AAPL", "BA", "JPM", "UNH", "XOM"]
+    symbols = get_eval_stocks()
     full_df = collect_data(symbols, start, buffer, freq="1d")
     full_df = full_df.dropna()
     prices_all = torch.tensor(full_df.values, dtype=torch.float32)
@@ -184,6 +221,9 @@ def train_eval(model_class, kwargs=None, seq: int = 60, epochs: int = 50, lr: fl
         y_train=y
     )
     trainer.train(num_epochs=epochs)
+    trainer.plot_losses(fig_path=train_fig_path)
+    # plot predictions from in-sample
+    trainer.eval(X, y, scaler, fig_path=eval_fig_path)
 
     # 6) Use the trained model to predict all target data
     X_all_scaled = scaler.transform(X_all).to("cpu")
@@ -199,9 +239,9 @@ def train_eval(model_class, kwargs=None, seq: int = 60, epochs: int = 50, lr: fl
     )
 
     # 7) Restrict to the official eval period + column order
-    eval_df = eval_df[["AAPL", "BA", "JPM", "UNH", "XOM"]]
+    eval_df = eval_df[get_eval_stocks()]
     preds_df = preds_df_all.loc[eval_df.index]
-    preds_df = preds_df[["AAPL", "BA", "JPM", "UNH", "XOM"]]
+    preds_df = preds_df[get_eval_stocks()]
 
     # 8) Run the official evaluator
     evaluator = StockModelEvaluator()

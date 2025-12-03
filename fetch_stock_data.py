@@ -1,5 +1,10 @@
 import yfinance as yf
 import matplotlib.pyplot as plt
+import pandas as pd
+
+def get_sp500_symbols():
+    df = pd.read_csv("sp500.csv")
+    return df["Symbol"].tolist()
 
 def collect_data(symbols, start_date, end_date, freq="1d"):
     """
@@ -27,6 +32,9 @@ def collect_data(symbols, start_date, end_date, freq="1d"):
     data = data["Close"]
     return data
 
+def get_eval_stocks():
+    return ["AAPL", "JPM", "XOM", "BA", "UNH"]
+
 def collect_eval_data():
     """
     Gather the evaluation dataset for the project.
@@ -41,7 +49,7 @@ def collect_eval_data():
     pandas.DataFrame
         A dataframe of closing prices for the evaluation symbols.
     """
-    symbols = ["AAPL", "JPM", "XOM", "BA", "UNH"]
+    symbols = get_eval_stocks()
     start_date, end_date = ("2024-11-01", "2025-10-31")
     eval_df = collect_data(symbols, start_date, end_date)
     return eval_df
