@@ -1,11 +1,17 @@
 MAE by stock (holdout)
 ['AAPL', 'JPM', 'XOM', 'BA', 'UNH']
-0.0147, 0.0124, 0.0123, 0.0174, 0.0194
+0.0148, 0.0117, 0.0123, 0.0169, 0.0195
 
 MAE overall (holdout)
-1.27%
+1.23%
 
 Directional Accuracy by stock (holdout)
-[0.5132, 0.4868, 0.5185, 0.5503, 0.5185]
+[0.5079, 0.5291, 0.4868, 0.5132, 0.4815]
 Directional Accuracy Overall (holdout)
-51.75%
+50.37%
+
+Hyperparameters:
+num_layers = 1
+hidden_dim = 16
+dropout = 0.5
+lr = 0.0001
