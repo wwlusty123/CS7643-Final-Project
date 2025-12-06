@@ -1,0 +1,15 @@
+Default Parameter Results
+
+MAE by stock (holdout)
+['AAPL', 'JPM', 'XOM', 'BA', 'UNH']
+[0.0141, 0.0110, 0.0116, 0.0160, 0.0191]
+
+MAE overall (holdout)
+1.16%
+
+Directional Accuracy by stock (holdout)
+[0.5185, 0.5873, 0.5503, 0.5344, 0.5026]
+
+Directional Accuracy Overall (holdout)
+53.86%
+
