@@ -76,7 +76,8 @@ class StockCNN(nn.Module):
         super(StockCNN, self).__init__()
         if output_dim is None:
             output_dim = input
-        
+
+
         self.input = input_dim
         self.hidden = hidden
         padding = kernel // 2
@@ -96,7 +97,7 @@ class StockCNN(nn.Module):
         self.relu = nn.ReLU()
         self.pool = nn.AdaptiveAvgPool1d(1)
         self.linear = nn.Linear(hidden, output_dim)
-    
+
     def forward(self, x):
         x = x.permute(0, 2, 1)
         x = self.relu(self.conv1(x))
@@ -104,3 +105,21 @@ class StockCNN(nn.Module):
         x = self.pool(x).squeeze(-1)
         out = self.linear(x)
         return out
+
+
+class StockGRU(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.1, num_layers=1):
+        super().__init__()
+        self.gru = nn.GRU(
+            input_dim,
+            hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0
+        )
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        h0 = torch.zeros(self.gru.num_layers, x.size(0), self.gru.hidden_size)
+        out, _ = self.gru(x, h0)
+        return self.fc(out[:, -1, :])
